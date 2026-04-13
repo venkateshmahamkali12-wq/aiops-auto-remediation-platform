@@ -1,72 +1,69 @@
 # AI-Powered AIOps Auto-Remediation Platform
 
-A DevOps incident analysis platform that uses LLM-powered reasoning to diagnose infrastructure issues from logs and metrics. Submit logs and a question, and get structured analysis with root cause, evidence, recommended fix, and risk assessment.
+An AI-powered incident analysis and auto-remediation platform. Submit logs, get a structured diagnosis with a confidence score, approve or auto-approve the fix, and execute remediation actions.
 
 ## Architecture
 
 ```
-User / Alert ──► FastAPI ──► RAG Service ──► LLM Service ──► OpenAI
-                  (API)      (context)       (gpt-4o-mini)
+Logs → AI Analysis → Confidence Score → Approval Gate → Auto-Remediation
+                          │                    │
+                    ≥ 0.9 auto-approve    < 0.9 human review
 ```
 
-See [docs/architecture.md](docs/architecture.md) for details.
+See [docs/architecture.md](docs/architecture.md) for full details.
 
 ## Quick Start
 
 ```bash
-# 1. Configure your API key
-cp .env.example .env
-# Edit .env and set OPENAI_API_KEY
-
-# 2. Run with Docker
+cp .env.example .env    # Set OPENAI_API_KEY
 docker-compose up --build
 ```
 
-The API is available at `http://localhost:8000`.
+API available at `http://localhost:8000`.
 
-## API
+## API Usage
 
-### Health Check
+### 1. Analyze an Incident
 
-```
-GET /
-```
-
-Returns `{"status": "ok"}`.
-
-### Chat / Analyze
-
-```
-POST /api/chat
-Content-Type: application/json
-
-{
-  "question": "Why is the pod crashing?",
-  "logs": "2024-01-15 ERROR OOMKilled container web-app memory limit 512Mi"
-}
+```bash
+curl -X POST http://localhost:8000/api/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "Why is the pod crashing?",
+    "logs": "2024-01-15 ERROR OOMKilled container web-app memory limit 512Mi"
+  }'
 ```
 
-The `logs` field is optional. When provided, the LLM uses them as context for its analysis. Without logs, it answers based on general DevOps knowledge.
+Response includes `confidence_score`, `severity`, `root_cause`, `recommended_actions`, and whether it was `auto_approved`.
 
-**Response:**
+### 2. Approve (if not auto-approved)
 
-```json
-{
-  "response": "## Root Cause\n..."
-}
+```bash
+curl -X POST http://localhost:8000/api/remediations/{id}/approve \
+  -H "Content-Type: application/json" \
+  -d '{"approved_by": "alice"}'
 ```
+
+### 3. Execute Remediation
+
+```bash
+curl -X POST http://localhost:8000/api/remediations/{id}/execute
+```
+
+### Other Endpoints
+
+- `GET /api/remediations` — List all remediations
+- `GET /api/remediations/{id}` — Get remediation details
+- `POST /api/remediations/{id}/reject` — Reject a remediation
+- `POST /api/chat` — Legacy text-based analysis
 
 ## Development
 
 ```bash
 cd backend
 pip install -r requirements.txt
-
-# Run locally
-uvicorn app.main:app --reload
-
-# Run tests
-pytest tests/ -v
+uvicorn app.main:app --reload    # Run server
+pytest tests/ -v                 # Run tests (26 tests)
 ```
 
 ## Project Structure
@@ -74,15 +71,19 @@ pytest tests/ -v
 ```
 backend/
 ├── app/
-│   ├── main.py              # FastAPI app, health check, logging config
+│   ├── main.py                      # FastAPI app + router setup
+│   ├── models.py                    # Pydantic models (AnalysisResult, Remediation, etc.)
 │   ├── api/
-│   │   └── chat.py          # POST /api/chat endpoint
+│   │   ├── chat.py                  # POST /api/chat (legacy)
+│   │   └── remediation.py          # Analyze, approve, reject, execute endpoints
 │   └── services/
-│       ├── llm_service.py   # OpenAI integration with error handling
-│       └── rag_service.py   # Context building and prompt construction
+│       ├── llm_service.py           # OpenAI integration
+│       ├── rag_service.py           # Context building + structured analysis
+│       ├── remediation_store.py     # In-memory remediation store
+│       └── remediation_executor.py  # Action execution (kubectl dry-run)
 ├── tests/
-│   ├── test_api.py          # API endpoint tests
-│   └── test_services.py     # Service unit tests
+│   ├── test_api.py                  # 12 API tests
+│   └── test_services.py            # 14 service tests
 ├── Dockerfile
 └── requirements.txt
 ```
